@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Document Assistant</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: #0f0f1a;
+            overflow-y: auto;
+        }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at 20% 50%, #1a0533 0%, transparent 50%),
+                        radial-gradient(ellipse at 80% 20%, #0d1f4a 0%, transparent 50%),
+                        radial-gradient(ellipse at 50% 80%, #0a2a1a 0%, transparent 50%);
+            animation: bgShift 8s ease-in-out infinite alternate;
+            z-index: -1;
+        }
+
+        @keyframes bgShift {
+            0%   { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(30px, 20px) rotate(3deg); }
+        }
+
+        /* Floating particles */
+        .particles {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .particle {
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            background: rgba(102, 126, 234, 0.4);
+            border-radius: 50%;
+            animation: float linear infinite;
+        }
+
+        @keyframes float {
+            0%   { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+            10%  { opacity: 1; }
+            90%  { opacity: 1; }
+            100% { transform: translateY(-100px) rotate(720deg); opacity: 0; }
+        }
+
+        .container {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            padding: 40px;
+            width: 100%;
+            max-width: 680px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 35px;
+        }
+
+        .header .icon { font-size: 50px; margin-bottom: 12px; }
+
+        .header h1 {
+            font-size: 26px;
+            font-weight: 700;
+            color: white;
+            margin-bottom: 5px;
+        }
+
+        .header .subtitle {
+            color: rgba(255,255,255,0.5);
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .header .author {
+            color: rgba(102, 126, 234, 0.8);
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .section { margin-bottom: 22px; }
+
+        .section label {
+            display: block;
+            font-weight: 600;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 10px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .upload-area {
+            border: 2px dashed rgba(102, 126, 234, 0.4);
+            border-radius: 14px;
+            padding: 28px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .upload-area:hover {
+            background: rgba(102, 126, 234, 0.1);
+            border-color: rgba(102, 126, 234, 0.8);
+        }
+
+        .upload-area .upload-icon { font-size: 36px; margin-bottom: 8px; }
+
+        .upload-area p {
+            color: rgba(255,255,255,0.5);
+            font-size: 13px;
+        }
+
+        .upload-area strong { color: #667eea; }
+        #fileInput { display: none; }
+
+        .file-selected {
+            margin-top: 10px;
+            padding: 10px 15px;
+            background: rgba(46, 213, 115, 0.1);
+            border: 1px solid rgba(46, 213, 115, 0.3);
+            border-radius: 8px;
+            color: #2ed573;
+            font-size: 13px;
+            display: none;
+        }
+
+        /* Already loaded banner */
+        .already-loaded {
+            padding: 14px 18px;
+            background: rgba(46, 213, 115, 0.08);
+            border: 1px solid rgba(46, 213, 115, 0.25);
+            border-radius: 12px;
+            color: #2ed573;
+            font-size: 13px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .already-loaded span { flex: 1; }
+
+        .clear-btn {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            color: rgba(255,255,255,0.5);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .clear-btn:hover { background: rgba(255,0,0,0.2); color: #ff6b6b; }
+
+        .primary-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 12px;
+        }
+
+        .primary-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(102,126,234,0.4); }
+        .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        textarea {
+            width: 100%;
+            padding: 15px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            font-size: 15px;
+            resize: vertical;
+            min-height: 100px;
+            font-family: inherit;
+            transition: border 0.3s;
+            color: white;
+            background: rgba(255,255,255,0.05);
+        }
+
+        textarea::placeholder { color: rgba(255,255,255,0.25); }
+        textarea:focus { outline: none; border-color: rgba(102,126,234,0.6); }
+
+        .ask-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #11998e, #38ef7d);
+            color: #0a0a0a;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 12px;
+        }
+
+        .ask-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(56,239,125,0.3); }
+        .ask-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        .answer-box {
+            background: rgba(102,126,234,0.08);
+            border: 1px solid rgba(102,126,234,0.2);
+            border-radius: 14px;
+            padding: 20px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .answer-box h3 {
+            color: #667eea;
+            margin-bottom: 12px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .answer-box p {
+            color: rgba(255,255,255,0.85);
+            line-height: 1.75;
+            font-size: 14px;
+            white-space: pre-wrap;
+        }
+
+        .chunks-info {
+            font-size: 11px;
+            color: rgba(255,255,255,0.25);
+            text-align: right;
+            margin-top: 12px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .status.loading { background: rgba(255,165,0,0.1); color: orange; }
+        .status.success { background: rgba(46,213,115,0.1); color: #2ed573; }
+        .status.error   { background: rgba(255,71,87,0.1);  color: #ff4757; }
+
+        .divider {
+            height: 1px;
+            background: rgba(255,255,255,0.07);
+            margin: 22px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Floating particles -->
+    <div class="particles" id="particles"></div>
+
+    <div class="container">
+
+        <div class="header">
+            <div class="icon">🔍</div>
+            <h1>RAG Document Assistant</h1>
+            <p class="subtitle">Upload a PDF and ask questions — get AI-powered answers instantly</p>
+            <p class="author">by Soumya</p>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="section">
+            <label>Step 1 — Upload your document</label>
+
+            <!-- Already loaded banner -->
+            <div class="already-loaded" id="alreadyLoaded">
+                <span>📄 <span id="loadedFileName">Document already loaded</span> — ready to answer questions!</span>
+                <button class="clear-btn" onclick="clearDocument()">Change</button>
+            </div>
+
+            <!-- Upload area (shown when no doc loaded) -->
+            <div id="uploadSection">
+                <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                    <div class="upload-icon">📄</div>
+                    <p><strong>Click to upload</strong> or drag and drop</p>
+                    <p>PDF files only</p>
+                </div>
+                <input type="file" id="fileInput" accept=".pdf">
+                <div class="file-selected" id="fileSelected">✅ <span id="fileName"></span></div>
+                <button class="primary-btn" id="uploadBtn" onclick="uploadFile()" disabled>
+                    Upload & Process Document
+                </button>
+                <div class="status" id="uploadStatus"></div>
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Question Section -->
+        <div class="section">
+            <label>Step 2 — Ask a question</label>
+            <textarea
+                id="questionInput"
+                placeholder="e.g. What is this document about? What are the main findings?"
+            ></textarea>
+            <button class="ask-btn" id="askBtn" onclick="askQuestion()" disabled>
+                🔍 Get Answer
+            </button>
+            <div class="status" id="askStatus"></div>
+        </div>
+
+        <!-- Answer -->
+        <div class="answer-box" id="answerBox">
+            <h3>💡 Answer</h3>
+            <p id="answerText"></p>
+            <div class="chunks-info" id="chunksInfo"></div>
+        </div>
+
+    </div>
+
+    <script>
+        const API = 'http://127.0.0.1:8000';
+
+        // Generate floating particles
+        const container = document.getElementById('particles');
+        for (let i = 0; i < 25; i++) {
+            const p = document.createElement('div');
+            p.className = 'particle';
+            p.style.left = Math.random() * 100 + '%';
+            p.style.animationDuration = (Math.random() * 15 + 10) + 's';
+            p.style.animationDelay = (Math.random() * 10) + 's';
+            p.style.width = p.style.height = (Math.random() * 3 + 1) + 'px';
+            container.appendChild(p);
+        }
+
+        // On page load — check if ChromaDB already has documents
+        window.addEventListener('load', async () => {
+            try {
+                const res = await fetch(`${API}/inspect`);
+                const data = await res.json();
+                if (data.total_chunks > 0) {
+                    const filenames = [...new Set(data.metadata.map(m=>m.filename))];
+                    showAlreadyLoaded(filenames.join(' . '));
+                }
+            } catch (e) {
+                // API not reachable — show normal upload
+            }
+        });
+
+        function showAlreadyLoaded(filename) {
+            document.getElementById('alreadyLoaded').style.display = 'flex';
+            document.getElementById('uploadSection').style.display = 'none';
+            document.getElementById('loadedFileName').textContent = filename;
+            document.getElementById('askBtn').disabled = false;
+        }
+
+        function clearDocument() {
+            document.getElementById('alreadyLoaded').style.display = 'none';
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('askBtn').disabled = true;
+            document.getElementById('answerBox').style.display = 'none';
+        }
+
+        // File selected
+        document.getElementById('fileInput').addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                document.getElementById('fileName').textContent = file.name;
+                document.getElementById('fileSelected').style.display = 'block';
+                document.getElementById('uploadBtn').disabled = false;
+            }
+        });
+
+        // Upload
+        async function uploadFile() {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) return;
+
+            const uploadBtn = document.getElementById('uploadBtn');
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Processing...';
+            showStatus('uploadStatus', 'loading', '⏳ Reading and processing your PDF...');
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`${API}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showStatus('uploadStatus', 'success',
+                        `✅ Done! ${data.page_count} pages · ${data.word_count} words · ${data.total_chunks} chunks stored`
+                    );
+                    uploadBtn.textContent = '✅ Document Processed!';
+                    showAlreadyLoaded(file.name);
+                } else {
+                    showStatus('uploadStatus', 'error', `❌ ${data.detail}`);
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = 'Upload & Process Document';
+                }
+            } catch (err) {
+                showStatus('uploadStatus', 'error', '❌ Could not connect to API.');
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload & Process Document';
+            }
+        }
+
+        // Ask
+        async function askQuestion() {
+            const question = document.getElementById('questionInput').value.trim();
+            if (!question) {
+                showStatus('askStatus', 'error', '❌ Please type a question first.');
+                return;
+            }
+
+            const askBtn = document.getElementById('askBtn');
+            askBtn.disabled = true;
+            askBtn.textContent = '⏳ Thinking...';
+            showStatus('askStatus', 'loading', '🤖 AI is generating your answer...');
+
+            try {
+                const response = await fetch(`${API}/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: question })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('answerText').textContent = data.answer;
+                    document.getElementById('chunksInfo').textContent =
+                        `Source: ${data.source}. Based on ${data.chunks_used} sections`;
+                    document.getElementById('answerBox').style.display = 'block';
+                    showStatus('askStatus', 'success', '✅ Answer generated!');
+                    askBtn.textContent = '🔍 Get Answer';
+                    askBtn.disabled = false;
+                } else {
+                    showStatus('askStatus', 'error', `❌ ${data.detail[0].msg}`);
+                    askBtn.textContent = '🔍 Get Answer';
+                    askBtn.disabled = false;
+                }
+            } catch (err) {
+                showStatus('askStatus', 'error', '❌ Could not connect to API.');
+                askBtn.textContent = '🔍 Get Answer';
+                askBtn.disabled = false;
+            }
+        }
+
+        function showStatus(id, type, message) {
+            const el = document.getElementById(id);
+            el.className = `status ${type}`;
+            el.textContent = message;
+            el.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+__pycache__/
+chroma_db/
+venv/
+test.txt
+*.pyc
+.env
+.DS_Store
+parent_store/
+.claude/
+requirements.txt
