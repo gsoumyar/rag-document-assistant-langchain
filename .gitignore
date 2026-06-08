@@ -15,6 +15,7 @@ out_pymupdf.txt
 # Python cache
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # PDFs
 *.pdf

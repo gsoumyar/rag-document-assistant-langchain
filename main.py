@@ -11,10 +11,11 @@ import torch
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 import fitz
 import chromadb
 from FlagEmbedding import BGEM3FlagModel
+from utils import chunk_markdown, get_smart_context, contextualize_chunk, hybrid_score
 
 
 # ── App ──
@@ -82,143 +83,6 @@ def extract_txt_pdf(content: bytes) -> str:
         os.remove(tmp_path)
 
 
-def chunk_markdown(md: str, max_words: int = 250):
-    """Structure-aware chunking for Docling markdown.
-    - Splits at heading boundaries (each section = one chunk)
-    - Keeps tables intact (never splits a | block)
-    - Prepends the heading trail so each chunk knows where it lives
-    - Returns list of dicts: {"text": ..., "trail": ...}
-    - Falls back to word-splitting ONLY if a single section is too big
-    """
-    lines = md.splitlines()
-    chunks = []
-    heading_trail = []
-    current_lines = []
-
-    def flush():
-        if not current_lines:
-            return
-        body = "\n".join(current_lines).strip()
-        if not body:
-            return
-        trail = " > ".join(heading_trail)
-
-        if len(body.split()) <= max_words:
-            text = f"{trail}\n\n{body}" if trail else body
-            chunks.append({"text": text, "trail": trail})
-        else:
-            # Oversized section: separate table blocks from prose, protect tables
-            blocks = []
-            current_block = []
-            in_table = False
-
-            for line in body.splitlines():
-                line_is_table = line.strip().startswith("|")
-                if line_is_table and not in_table:
-                    if current_block:
-                        blocks.append(("prose", "\n".join(current_block)))
-                        current_block = []
-                    in_table = True
-                elif not line_is_table and in_table:
-                    if current_block:
-                        blocks.append(("table", "\n".join(current_block)))
-                        current_block = []
-                    in_table = False
-                current_block.append(line)
-
-            if current_block:
-                blocks.append(("table" if in_table else "prose", "\n".join(current_block)))
-
-            for block_type, block_text in blocks:
-                if block_type == "table":
-                    text = f"{trail}\n\n{block_text}" if trail else block_text
-                    chunks.append({"text": text, "trail": trail})
-                else:
-                    words = block_text.split()
-                    if len(words) <= max_words:
-                        text = f"{trail}\n\n{block_text}" if trail else block_text
-                        chunks.append({"text": text, "trail": trail})
-                    else:
-                        for i in range(0, len(words), max_words):
-                            piece = " ".join(words[i:i + max_words])
-                            text = f"{trail}\n\n{piece}" if trail else piece
-                            chunks.append({"text": text, "trail": trail})
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            flush()
-            current_lines = []
-            level = len(stripped) - len(stripped.lstrip("#"))
-            title = stripped.lstrip("#").strip()
-            heading_trail = heading_trail[:level - 1]
-            heading_trail.append(title)
-        else:
-            current_lines.append(line)
-
-    flush()
-    return chunks
-
-
-def get_smart_context(full_doc: str, chunk_text: str, budget: int = 15000) -> str:
-    """Build a smart context window for Contextual Retrieval.
-    Includes: document start (title/TOC) + local neighborhood + document end.
-    This gives the LLM enough to situate any chunk without exceeding the budget.
-    """
-    doc_start = full_doc[:5000]
-    doc_end = full_doc[-2000:] if len(full_doc) > 7000 else ""
-
-    # Find where this chunk lives in the original document
-    search_key = chunk_text[:200] if len(chunk_text) > 200 else chunk_text
-    chunk_pos = full_doc.find(search_key)
-
-    local_context = ""
-    if chunk_pos >= 0:
-        local_start = max(0, chunk_pos - 1500)
-        local_end = min(len(full_doc), chunk_pos + len(chunk_text) + 1500)
-        local_context = full_doc[local_start:local_end]
-
-    # Assemble within budget
-    context = doc_start
-    if local_context:
-        context += "\n...\n" + local_context
-    if doc_end:
-        context += "\n...\n" + doc_end
-
-    return context[:budget]
-
-
-def contextualize_chunk(chunk_text: str, full_doc: str) -> str:
-    """Contextual Retrieval: ask local Llama to write a short sentence
-    situating this chunk within the full document. Uses smart context window.
-    """
-    smart_ctx = get_smart_context(full_doc, chunk_text)
-
-    prompt = f"""Here is a document excerpt:
-<document>
-{smart_ctx}
-</document>
-
-Here is a chunk from that document:
-<chunk>
-{chunk_text}
-</chunk>
-
-Write a single sentence (under 30 words) that situates this chunk within
-the document — what topic it covers, what section it belongs to, and what
-makes it distinct. Return ONLY that sentence, nothing else."""
-
-    try:
-        response = requests.post("http://localhost:11434/api/chat", json={
-            "model": "llama3.2",
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False
-        })
-        context_sentence = response.json()["message"]["content"].strip()
-        return f"{context_sentence}\n\n{chunk_text}"
-    except Exception:
-        return chunk_text
-
 
 def rerank_chunks_with_metadata(question: str, chunks: list, metadatas: list, top_n: int = 2) -> list:
     """Reranker: scores each (question, chunk) pair side by side.
@@ -244,8 +108,10 @@ def rerank_chunks_with_metadata(question: str, chunks: list, metadatas: list, to
 
 class Question(BaseModel):
     text: str
-    @validator('text')
-    def mandatory_field(cls, value):
+
+    @field_validator('text')
+    @classmethod
+    def mandatory_field(cls, value: str) -> str:
         if not value.strip():
             raise ValueError('Mandatory Field')
         return value.strip()
@@ -321,7 +187,7 @@ async def upload_document(
                 "filename": file.filename,
                 "chunk_index": i,
                 "section": chunk["trail"],
-                "contextual_retrieval": contextual_retrieval
+                "contextual_retrieval": int(contextual_retrieval)
             }]
         )
         _sparse_store[chunk_id] = sparse_vec
@@ -378,7 +244,7 @@ def ask_question(question: Question):
             for token in set(q_sparse.keys()) & set(chunk_sparse.keys())
         )
 
-        final_score = (0.7 * dense_score) + (0.3 * sparse_score)
+        final_score = hybrid_score(dense_score, sparse_score)
         hybrid_scores.append((idx, final_score))
 
     # Step 5: take top 5 from hybrid for reranking

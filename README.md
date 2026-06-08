@@ -129,6 +129,13 @@ pip install -r requirements.txt
 uvicorn main:app
 ```
 
+### Test
+
+```bash
+# Unit tests — no models or Ollama required, runs in under a second
+pytest tests/
+```
+
 > **Note:** Do not use `--reload`. Docling and HuggingFace write cache files into `.venv` during model loading, which triggers WatchFiles to restart the server in a loop. Use plain `uvicorn main:app`.
 
 ### Usage
@@ -169,17 +176,22 @@ Results append to `eval_results.json` for comparison across configurations.
 ```
 rag-document-assistant-langchain/
     main.py                 FastAPI app, full RAG pipeline
-    golden_test.json        10 question-answer pairs for evaluation
+    utils.py                Pure helper functions (chunking, scoring, context)
     eval_ragas.py           RAGAS evaluation harness
+    golden_test.json        10 question-answer pairs for evaluation
     requirements.txt        Python dependencies
-    parse_test.py           Standalone: Docling vs PyMuPDF comparison
-    bge_test.py             Standalone: BGE-M3 embedding validation
-    ollama_test.py          Standalone: Ollama connection test
-    rerank_test.py          Standalone: reranker validation
-    static/                 Simple web UI
-    chroma_db/              ChromaDB storage (auto-generated)
-    sparse_store.json       Sparse vectors (auto-generated)
-    eval_results.json       Evaluation history (auto-generated)
+    static/
+        index.html          Web UI
+    tests/
+        test_chunking.py    Pytest unit tests (no model deps, fast)
+    scripts/
+        parse_test.py       Standalone: Docling vs PyMuPDF comparison
+        bge_test.py         Standalone: BGE-M3 embedding validation
+        ollama_test.py      Standalone: Ollama connection test
+        rerank_test.py      Standalone: reranker validation
+    chroma_db/              ChromaDB storage (auto-generated, gitignored)
+    sparse_store.json       Sparse vectors (auto-generated, gitignored)
+    eval_results.json       Evaluation history (auto-generated, gitignored)
 ```
 
 ---

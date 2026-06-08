@@ -457,8 +457,11 @@
 
                 if (response.ok) {
                     document.getElementById('answerText').textContent = data.answer;
+                    const srcText = data.sources && data.sources.length
+                        ? data.sources.map(s => s.section ? `${s.filename} — ${s.section}` : s.filename).join(' | ')
+                        : 'unknown';
                     document.getElementById('chunksInfo').textContent =
-                        `Source: ${data.source}. Based on ${data.chunks_used} sections`;
+                        `Sources: ${srcText} · ${data.chunks_used} chunk(s) used`;
                     document.getElementById('answerBox').style.display = 'block';
                     showStatus('askStatus', 'success', '✅ Answer generated!');
                     askBtn.textContent = '🔍 Get Answer';

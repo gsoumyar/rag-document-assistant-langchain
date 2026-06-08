@@ -9,3 +9,4 @@ FlagEmbedding
 transformers
 torch
 requests
+pytest
